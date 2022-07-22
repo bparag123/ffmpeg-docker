@@ -12,13 +12,19 @@ const s3 = new AWS.S3({ apiVersion: '2006-03-01' });
 import { mkdir, readFile } from 'fs/promises'
 import { writeFile, readdir, rmdir, unlink, rm } from 'fs/promises'
 import ffmpeg from "fluent-ffmpeg"
+import { v4 as uuid } from 'uuid'
 
 export const getRecording = async (meetingId) => {
 
 	const list = await getObjects(meetingId, 'audio');
 	console.log("List is ", list)
+	const id = uuid()
+	const tempDir = `./${id}`
+	const outputFile = `${tempDir}/output.mp4`
+	console.log(tempDir)
+	console.log(outputFile)
 	try {
-		await mkdir('./temp')
+		await mkdir(`./${tempDir}`)
 	} catch (error) {
 
 	}
@@ -35,18 +41,18 @@ export const getRecording = async (meetingId) => {
 		console.log(results)
 		const writePromises = []
 		results.map((ele, i) => {
-			writePromises.push(writeFile(`./temp/${list[i].split('audio/')[1]}`, ele.Body))
+			writePromises.push(writeFile(`${tempDir}/${list[i].split('audio/')[1]}`, ele.Body))
 		})
 		await Promise.all(writePromises)
 
-		const fileDir = await readdir('./temp')
+		const fileDir = await readdir(tempDir)
 		let videoMerger = ffmpeg()
 		fileDir.forEach((ele) => {
-			videoMerger = videoMerger.input(`./temp/${ele}`)
+			videoMerger = videoMerger.input(`${tempDir}/${ele}`)
 		})
 
 		const merge = new Promise((fulfilled, rejected) => {
-			videoMerger.mergeToFile(`./output.mp4`)
+			videoMerger.mergeToFile(outputFile)
 				.on('error', function (err) {
 					console.log('Error ' + err.message);
 				})
@@ -57,16 +63,20 @@ export const getRecording = async (meetingId) => {
 
 		await merge;
 
-		const outputFile = await readFile('./output.mp4')
+		const outputFileData = await readFile(outputFile)
+		console.log(outputFileData)
 		const params = {
 			Bucket: process.env.BUCKET_NAME,
 			Key: `${meetingId}/recording.mp4`,
-			Body: outputFile,
+			Body: outputFileData,
 		};
 		await s3.putObject(params).promise()
 
-		await rm('./temp', { recursive: true })
-		await unlink('./output.mp4')
+		console.log("Uploaded To S3")
+
+		await rm(`${tempDir}`, { recursive: true })
+
+		console.log("Completed...")
 
 		return {
 			headers: {
